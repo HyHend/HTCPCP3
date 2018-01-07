@@ -5,7 +5,7 @@ Contact me if you're interested in more information.
 
 ### Screenshot:
 A screenshot showing the basic user interface and a graph based on mock netflow data.
-<img src="https://github.com/HyHend/HTCPCP3/blob/master/img/mock_data_screen.png" alt="Activity feature plot" width="650px">
+<img src="https://github.com/HyHend/HTCPCP3/blob/master/img/mock_data_screen.png" alt="Screenshot">
 
 ### Acknowledgements:
 - Cabbibo LeapMotion force-directed graph
