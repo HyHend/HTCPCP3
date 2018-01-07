@@ -1,0 +1,1110 @@
+<!DOCTYPE html> 
+<html> 
+<head> 
+<meta charset=utf-8> 
+<title>Graph</title> 
+<link href="bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+<link href="bootstrap_slider.css" rel="stylesheet" media="screen">
+<link href="bootstrap_datepicker.css" rel="stylesheet" media="screen">
+<style> 
+	body { 
+		margin: 0; 
+		font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+		font-size: 12px;
+		color:#FFF;
+		background: #000;
+	} 
+
+	canvas { 
+		width: 100%; 
+		height: 100% 
+	}
+
+	#world {
+		position: fixed;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+		background: #000000;
+	}
+
+	#loadingIMG {
+		position: absolute;
+		top:50%;
+		left:50%;
+		/*background-color: #000;
+		background-size: 64px;*/
+		width:64px;
+		height:64px;
+		margin:-32px 0 0 -32px;
+	}
+
+	#tooltip {
+		position: relative;
+		width:180px;
+		/*height:100px;*/
+	}
+
+	#tooltip_background {
+		position: relative;
+		top:20px;
+		left:20px;
+		bottom:0;
+		right:0;
+		background-color: rgba(32,32,32,0.6);
+		color:#FFF;
+		padding:10px;
+		margin-bottom:20px;
+	}
+
+	#sidebar {
+		position: absolute;
+		left:0;
+		min-height: 100%;
+		width:300px;
+		background-color: rgba(16,16,16,0.7);
+		padding:0 10px 0 10px;
+		border-right: 1px solid #222;
+		/*overflow-y: scroll;*/
+	}
+
+	.slider-selection {
+		background: #BABABA;
+	}
+
+	#sidebarHamburger {
+		position: absolute;
+		top:0;
+		right:0;
+		padding:3px 6px 3px 6px;
+		margin:5px;
+		background:#222;
+	}
+
+	#searchbar {
+		position: fixed;
+		top:10px;
+		right:10px;
+		width:330px;
+	}
+
+	#pause_button {
+		position: relative;
+		float: right;
+		padding: 4px 12px 4px 12px;
+		margin-right:5px;
+		-webkit-border-radius: 2px;
+		-moz-border-radius: 2px;
+		border-radius: 2px;
+		background: rgba(32,32,32,0.5);
+		border: 1px solid;
+		border-color: rgba(64,64,64,0.3);
+		color: #FFFFFF;
+		font-weight: bold;
+	}	
+
+	#reset_highlight_button {
+		position: relative;
+		float: right;
+		padding: 4px 7px 4px 7px;
+		margin-right:5px;
+		-webkit-border-radius: 2px;
+		-moz-border-radius: 2px;
+		border-radius: 2px;
+		background: rgba(32,32,32,0.5);
+		border: 1px solid;
+		border-color: rgba(64,64,64,0.3);
+		color: #FFFFFF;
+	}
+
+	#pause_button:hover, #reset_highlight_button:hover {
+		background: rgba(64,64,64,0.8);
+		cursor: pointer;
+	}
+
+	#pause_button:active, #reset_highlight_button:active {
+		background: rgba(64,64,64,0.8);
+		cursor: pointer;
+		box-shadow: 0 0 10px rgba(120,160,256,0.6);
+	}
+
+	#searchbar input {
+		position: relative;
+		float: right;
+		background: rgba(32,32,32,0.5);
+		color: #FFFFFF;
+		border-color: rgba(64,64,64,0.5);
+	}
+
+	.error {
+		color:rgb(255, 85, 82);
+	}
+</style> 
+</head> 
+<body> 
+
+<script src="palette.js"></script>
+<script src="jsonp.js"></script>
+<script src="WebVR.js"></script>
+<script src="three.js"></script> 
+<script src="FlyControls.js"></script>
+<script src="dotgraph.js"></script>
+<script src="dotparser.js"></script>
+<script src="ForceDirectedGraph.js"></script>
+<script src="TextCreator.js"></script>
+<script src="VREffect.js"></script>
+<script src="VRControls.js"></script>
+<script src="jquery.min.js"></script>
+<script src="bootstrap/js/bootstrap.min.js"></script>
+<script src="bootstrap_slider.js"></script>
+<script src="bootstrap_datepicker.js"></script>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+    uniform sampler2D texture1;
+    uniform float firstVertex;
+    uniform float density;
+    attribute vec4 color;
+	  attribute float weight;
+    varying vec3 vForce;
+
+    void main() {
+      vec3 pos1 = texture2D(texture1, color.xy).xyz;
+      vec3 pos2 = texture2D(texture1, color.zw).xyz;
+      gl_PointSize = 1.0;
+      if (firstVertex > 0.5) {
+        vForce = (density * (pos2 - pos1) * weight);
+        gl_Position = vec4(color.x * 2. - 1., color.y * 2. - 1., 0., 1.);
+      } else {
+        vForce = (density * (pos1 - pos2) * weight);
+        gl_Position = vec4(color.z * 2. - 1., color.w * 2. - 1., 0., 1.);
+      }
+      // vForce = clamp(vForce, vec3(-2.5), vec3(2.5));
+    }
+  </script>
+
+
+  <script id="fragmentShader" type="x-shader/x-fragment">
+    varying vec3 vForce;
+    void main() {
+      gl_FragColor = vec4(vForce, 1.);
+    }
+  </script>
+
+  <script id="fragmentShaderPos" type="x-shader/x-fragment">
+    varying vec2 vUv;
+    uniform sampler2D tPosition;
+    uniform sampler2D tForces;
+    uniform float strength;
+
+    const float d_width = 1. / ${WIDTH}.;
+    const float d_height = 1. / ${HEIGHT}.;
+
+    void main() {
+      vec4 pos = texture2D(tPosition, vUv);
+
+      if (pos.a > 0.5) {
+        vec3 fl = texture2D(tForces, vUv).xyz;
+        vec3 f = vec3(0.);
+        for (float y = d_height * 0.5; y < 1.0; y += d_height) {
+          if (texture2D(tPosition, vec2(0., y)).a > .5) {
+            for (float x = d_width * 0.5; x < 1.0; x += d_width) {
+              vec4 oPos = texture2D(tPosition, vec2(x, y));
+              vec3 diff = pos.xyz - oPos.xyz;
+              float a = length(diff) + 10.;
+              f += oPos.a * diff / pow(a, 3.7);
+            }
+          }
+        }
+        // f = clamp(f, vec3(-2.5), vec3(2.5));
+        vec3 newPos = pos.xyz + fl + f * strength;
+        gl_FragColor = vec4(newPos.xyz, pos.a);
+      } else {
+        gl_FragColor = vec4(0.);
+      }
+    }
+
+  </script>
+
+<script> 
+	var scene, projector,
+		camera, fieldOfView, aspectRatio, nearPlane, farPlane, HEIGHT, WIDTH,
+		renderer, container, graph, world, mouse;
+  var isPaused = false, lastMs = 0, currentNode, 
+    pickingBuffer = new Uint8Array(1 * 1 * 4);
+	var vrEffect;
+	var vrControls;
+	var vrCamera;
+	var loadingCube;
+	var tooltip;
+	var API_LOCATION = 'http://127.0.0.1:5000/api/v1.0'
+	var responseBak;
+	
+	// Do we use the "type" value in the node definition to 
+	// color the edges? (false: Show directed edges, blue->red)
+	var TYPED = getQueryString().typed == 'true';
+
+	// Do we want to use a VR headset?	
+	var VR = !(getQueryString().vr == 'false');
+
+	// With how much force does an edge attract?	
+	var EDGEFORCE = getQueryString().edgeforce || 0.00008;
+
+	// With how much force do vertices/nodes repel eachother
+	var VERTEXFORCE = getQueryString().vertexforce || 8000;
+
+	// How long do we timeout for the visualisation?
+	var VISUALISINGTIMEOUT = getQueryString().visualisingtimeout || 'auto';
+
+	/**
+	 * Create scene
+	 */
+	function createScene() {
+		// Get the width and the height of the screen,
+		HEIGHT = window.innerHeight;
+		WIDTH = window.innerWidth;
+
+		// Create the scene
+		scene = new THREE.Scene();
+		world = new THREE.Object3D();
+      	scene.add(world);
+		
+		// Create the camera
+		aspectRatio = WIDTH / HEIGHT;
+		fieldOfView = 60;
+		nearPlane = 1;
+		farPlane = 10000;
+		camera = new THREE.PerspectiveCamera(
+			fieldOfView,
+			aspectRatio,
+			nearPlane,
+			farPlane
+			);
+		vrCamera = new THREE.PerspectiveCamera();
+		
+		// Set the position of the camera
+		camera.position.x = 0;
+		camera.position.z = 1000;
+		camera.position.y = 0;
+		
+		// Create the renderer
+    	renderer = new THREE.WebGLRenderer();
+
+		// Define the size of the renderer
+		renderer.setSize(window.innerWidth, window.innerHeight);
+
+		// Create VR effect and add button to get into VR.
+		vrEffect = new THREE.VREffect(renderer);
+		if(VR) {
+			document.body.appendChild(WEBVR.getButton(vrEffect));
+		}
+
+		// Set vreffect parameters for oculus TODO
+		// vrEffect.separation = 20;
+		// vrEffect.distortion = 0.1;
+		// vrEffect.fov = 110;
+
+		// Create VR controls
+		vrControls = new THREE.VRControls(vrCamera);			//TODO try catch
+		vrControls.setVRDisplay(vrEffect.getVRDisplay())		//TODO try catch
+		// vrCamera.add(camera);
+		scene.add(camera);
+		// scene.add(vrCamera);
+
+
+		// Add dot in center of screen to know what one is looking/pointing at (if in VR)
+		if(VR) {
+			crosshair = new THREE.Mesh(
+				new THREE.CircleGeometry( 0.005, 32 ),
+				new THREE.MeshBasicMaterial( {
+					color: 0xffffff,
+					opacity: 0.5,
+					transparent: true
+				} )
+			);
+			crosshair.position.z = - 2;
+			camera.add(crosshair);
+		}
+		
+		// Add the DOM element of the renderer to the html
+		container = document.getElementById('world');
+		container.appendChild(renderer.domElement);
+		
+		// Create event listeners
+		window.addEventListener('resize', handleWindowResize, false);
+      	window.addEventListener('keypress', onKeypress, false);
+      	window.addEventListener('click', onDocumentMouseDown, false);
+      	window.addEventListener('mousemove', onDocumentMouseMove, false);
+	}
+
+	/**
+	 * Returns get query from url
+	 */
+	function getQueryString () {
+		// This function is anonymous, is executed immediately and 
+		// the return value is assigned to QueryString!
+		var query_string = {};
+		var query = window.location.search.substring(1);
+		var vars = query.split("&");
+		for (var i=0;i<vars.length;i++) {
+			var pair = vars[i].split("=");
+			// If first entry with this name
+			if (typeof query_string[pair[0]] === "undefined") {
+				query_string[pair[0]] = decodeURIComponent(pair[1]);
+				// If second entry with this name
+			} else if (typeof query_string[pair[0]] === "string") {
+				var arr = [ query_string[pair[0]],decodeURIComponent(pair[1]) ];
+				query_string[pair[0]] = arr;
+				// If third or later entry with this name
+			} else {
+				query_string[pair[0]].push(decodeURIComponent(pair[1]));
+			}
+		} 
+		return query_string;
+	}
+
+	/**
+	 * Creates movement controls
+	 */
+	function createControls() {
+		controls = new THREE.FlyControls(camera);
+		controls.movementSpeed = 10;
+		controls.domElement = container;
+		controls.rollSpeed = 0.01;
+		controls.autoForward = false;
+		controls.dragToLook = true;
+	}
+
+	/**
+	 * Retrieves and shows node information. Adds it to element innerHTML
+	 */
+	function loadNodeInfo(apiLocation, nid, element) {
+		// addLoading('Loading...');
+
+		// Called by data retrieval (either ajax or DOM js script include)
+		nodeDataCallback = function(ok, response){
+			element.innerHTML = `
+					<b style="font-size:13px;">`+response.node+`:</b><div style="width:100%; height:4px;"></div>
+					Hostname: `+response.lookup+`<br>
+					Geolocation: TODO<br>
+					DHCP: TODO<br>
+					CMDB: TODO<br>
+					InDegree: `+graph.inDegree(nid)+`<br>
+					OutDegree: `+graph.outDegree(nid)+`<br>
+					Src Ports: `+response.src_ports+`<br>
+					Dst Ports: `+response.dst_ports+`<br>
+					Sent MB: `+(Math.round(response.sent_bytes/1024/10.24)/100)+`<br>
+					Rcvd MB: `+(Math.round(response.rcvd_bytes/1024/10.24)/100)+`<br>
+					Sent pkts: `+response.sent_pkts+`<br>
+					Rcvd pkts: `+response.rcvd_pkts+`<br>
+					Rows: `+response.rows+`<br>
+				`;
+		}
+
+      	// JSONP default methods
+      	JSONP.init({
+			error: function(ex) {
+				console.warn("Failed to retrieve node info. " + ex.url);
+			}
+		});
+
+      	// Retrieve graph data and load the graph on callback
+      	JSONP.get(
+      		apiLocation, {"node":graph.nodes[nid]}, 
+      		nodeDataCallback
+  		);      
+	}
+
+	/**
+	 * Create graph
+	 */
+	function loadGraph(apiLocation, requestParams, init=false) {
+		var timeout = 0;
+		if(!init) {
+	      	addLoading('Loading...');
+	      	w = document.getElementById('world');
+			w.style.transition = "opacity 0.2s";
+			w.style.opacity = '0';
+			timeout = 200;
+		}
+
+		// Remove graph after fadeout finished
+		setTimeout(function() {
+			// Reset graph
+			graph.reset();
+			world.position.set(0,0,0);
+			world.scale.set(1, 1, 1);
+			graph.edgeForce = EDGEFORCE;
+			graph.vertexForce = VERTEXFORCE; 
+
+			// Called by data retrieval (either ajax or DOM js script include)
+			graphCallback = function(amount, response, ok=false){
+				console.log("amount",amount)
+				if(amount <= 0) {
+		      		updateLoading('No results. Retry :)');
+				}
+
+				// Dynamically set timeout
+				if(VISUALISINGTIMEOUT == 'auto') {
+					VISUALISINGTIMEOUT = Math.min(amount * (amount / 300), 10000)
+				}
+
+				// If amount of edges too large, ask user if ok
+				if((amount <= 1000 && amount > 0) || ok) {
+		      		updateLoading('Visualising...');
+					graph.loadJSON(response);
+
+					// Fadein after time. (Making initial graph rendering non visible)
+					setTimeout(function() {
+		      			w = document.getElementById('world');
+						w.style.transition = "opacity 0.3s";
+						w.style.opacity = '1';
+						removeLoading();
+					}, VISUALISINGTIMEOUT);
+				}
+				else if(amount > 0) {
+					// Too many edges, ask user if really to show. Do if user agrees
+		      		updateLoading('Waiting for user response...');
+		      		responseBak = response;
+		      		sidebar_confirm = document.createElement('div');
+					sidebar_confirm.id = 'sidebar_confirm';
+					sidebar_confirm.innerHTML = `
+						<div style="position:relative; margin:-10px 0 40px 10px; width:224px;
+							<button id="sidebar_confirm_btn" onclick="graphCallback(`+amount+`,responseBak, true); document.getElementById('sidebar_form').removeChild(document.getElementById('sidebar_confirm'))" type="submit" class="btn btn-danger">Show with `+amount+` edges</button>
+						</div>`;
+		      		document.getElementById('sidebar_form').appendChild(sidebar_confirm);
+				}
+			}
+
+	      	// JSONP default methods
+	      	JSONP.init({
+				error: function(ex){
+					console.warn("Failed to retrieve graph. "
+						+ "Falling back to default graph: " + ex.url);
+
+					// In case we could not perform get request
+	      			// Load json from script with name as in var graphFile 
+	      			updateLoading("Error:<br>API Server unavailable?");
+			      	var graphScript = document.createElement('script');
+					// graphScript.src = graphFile;
+					document.head.appendChild(graphScript);
+				}
+			});
+
+	      	// Retrieve graph data and load the graph on callback
+	      	JSONP.get(
+	      		apiLocation, requestParams, 
+	      		graphCallback
+	  		);      
+		}, timeout);	
+	}
+
+	/**
+	 * Update graph
+	 */
+	function updateGraph() {
+	    graph.computeForces();
+	    graph.updatePositions();
+	}
+
+	/**
+	 * Called on key press
+	 */
+    function onKeypress(e){
+      if(e.charCode == 112) {
+      	//P(ause)
+        if(isPaused) {
+          isPaused = false;
+          document.getElementById('pause_button').innerHTML="||"
+        }
+        else {
+          isPaused = true;
+          document.getElementById('pause_button').innerHTML="&#9658;"
+        }
+      }
+      if(e.charCode == 104) {
+      	//H
+      	graph.resetHighlight();
+      }
+      if(e.charCode == 106) {
+      	//J
+      	onOculusSelect();
+      }
+    }
+
+    /**
+     * When called, uses location x,y on screen and returns node at that location (if there)
+     */
+    function handlePickingScene(x, y) {
+		// Get renderer context
+		gl = renderer.getContext();
+
+    	// Render pickingscene
+		vrEffect.render(graph.pickingScene, camera);
+
+		// Read pixels at x, y
+		gl.readPixels(
+			x, 
+			y, 
+			1, 
+			1, 
+			gl.RGBA, 
+			gl.UNSIGNED_BYTE, 
+			pickingBuffer);
+
+		// Verify for these pixels if there is a node on this location
+		// Remembers this node in currentnode (undefined if none)
+		for (var i = 0; i < 1; i++) {
+			var nid = graph.colorToInt(
+				pickingBuffer[0], 
+				pickingBuffer[1], 
+				pickingBuffer[2]);
+			var node = graph.nodes[nid];
+			if(node != undefined 
+				&& currentNode != nid) {
+				// Remember node as last selected
+				currentNode = nid;
+			}
+			else if(node == undefined
+				&& currentNode != undefined){
+				// No node is selected
+				currentNode = undefined;
+			}
+	    }
+    }
+
+    /**
+     * TODO 
+     * On call, selects the element in the middle of the screen (oculus)
+     * And continues with default highlighting
+     */
+    function onOculusSelect() {
+		handlePickingScene(
+			Math.floor((WIDTH*window.devicePixelRatio)/2), 
+			Math.floor((HEIGHT*window.devicePixelRatio)/2));	// Not centre of the oculus screen
+    	graph.highlight(currentNode)
+    }
+
+    /**
+     * On mouse down
+     */
+    function onDocumentMouseDown(e) {
+		handlePickingScene(
+			(mouse.x*window.devicePixelRatio), 
+			(HEIGHT*window.devicePixelRatio) - (mouse.y*window.devicePixelRatio));
+    	graph.highlight(currentNode, !e.shiftKey);
+
+    	// Show tooltip if not in VR
+    	if(!VR
+    		&& currentNode != undefined) {
+    		if(tooltip != undefined) {
+	    		tooltip.parentNode.removeChild(tooltip);
+				tooltip = undefined;
+    		}
+    		tooltip = document.createElement('div');
+			tooltip.id = 'tooltip';
+    		tooltipContent = document.createElement('div');
+			tooltipContent.id = 'tooltip_background';
+			tooltipContent.innerHTML = 'Loading... ['+graph.nodes[currentNode]+']';
+			tooltip.setAttribute("style","top:"+(mouse.y-10)+"px; left:"+(mouse.x-10)+"px;");
+			tooltip.addEventListener("mouseout", function() {
+				tooltip.parentNode.removeChild(tooltip);
+				tooltip = undefined;
+			});
+			document.body.appendChild(tooltip);
+			tooltip.appendChild(tooltipContent);
+
+			// Call API to load info on tooltip
+			loadNodeInfo(API_LOCATION+"/node",currentNode,tooltipContent)
+    	}
+	}
+
+    /**
+     * On mouse move
+     */
+    function onDocumentMouseMove(e) {
+		mouse = {
+			x: e.clientX, 
+			y: e.clientY
+		};
+	}
+
+	/**
+	 * Called on window resize
+	 */
+	function handleWindowResize() {
+		// update height and width of the renderer and the camera
+		HEIGHT = window.innerHeight;
+		WIDTH = window.innerWidth;
+		renderer.setSize(WIDTH, HEIGHT);
+		camera.aspect = WIDTH / HEIGHT;
+		camera.updateProjectionMatrix();
+		vrEffect.WIDTH = WIDTH;
+		vrEffect.HEIGHT = HEIGHT;
+		vrEffect.setSize(WIDTH, HEIGHT);	//todo can be removed?
+	}
+	
+	/**
+	 * Called in animation loop
+	 */
+	function loop(){
+
+		// call the loop function again
+		vrEffect.requestAnimationFrame(loop);
+
+		// Update user input. Only when no forms are in focus
+		if ( $('input:focus').length <= 0 ) { 
+			controls.update(1);
+		}
+        vrControls.update(1);
+
+		// Temporarily save the camera position
+		var pos = camera.position.clone();
+		var quat = camera.quaternion.clone();
+
+		// Apply the VR HMD camera position and rotation
+		// on top of the orbited camera.
+		var rotatedPosition = vrCamera.position.applyQuaternion(camera.quaternion);
+		camera.position.add(rotatedPosition);
+		camera.quaternion.multiply(vrCamera.quaternion);
+
+		// render the scene (on screen)
+		vrEffect.render(scene, camera);
+
+		// Restore camera positions for next run
+		camera.position.copy(pos);
+		camera.quaternion.copy(quat);
+
+		// update graph
+		if (graph.inited 
+			&& !isPaused){
+			updateGraph();
+		}
+	}
+
+	/**
+	 * TODO
+	 */
+	function searchbarPress() {
+		// Multi highlight partial IP search optionality (slow, processing intensive)
+		reset = true;
+		graph.resetHighlight();
+		search_value = document.getElementById("ip_search").value
+		search_values = search_value.split(';');
+		for(var i in search_values) {
+			current_search_value = search_values[i].trim();
+			for(nid in graph.nodes) {
+				if(graph.nodes[nid].startsWith(current_search_value)) {
+					graph.highlight(nid, reset);
+					reset = false;
+				}
+			}
+		}
+
+		// Only allows highlighting one exact ip (fast, less awesome)
+		// nid = graph.nodes.indexOf(document.getElementById("ip_search").value)
+		// if(nid > -1) {
+		// 	currentNode = nid
+		// 	graph.highlight(currentNode, true)
+		// }
+		// else if (document.getElementById("ip_search").value.length > 5) {
+  //     		graph.resetHighlight();
+		// }
+	}
+
+	/**
+	 * UI built up in HTML DOM
+	 * TODO: There is an unhealthy combined usage of normal JS, JQuery, Bootstrap and addons
+	 * Reason: Creating technical debt to get it done. Fix when time available(!)
+	 */
+	function addNonVRUI() {
+		// Current query values
+		var currentParams = getQueryString()
+
+		// Create top right bar
+		searchbar = document.createElement('div');
+		searchbar.id = 'searchbar';
+		searchbar.innerHTML = `
+			<input type="text" class="form-control" id="ip_search" placeholder="Search on IP" onKeypress="searchbarPress()">
+			<div id="reset_highlight_button" class="top_right_btn" onclick="graph.resetHighlight()">RH</div>
+			<div id="pause_button" class="top_right_btn" onclick="if(isPaused) { isPaused = false; document.getElementById('pause_button').innerHTML='||' } else { isPaused = true; document.getElementById('pause_button').innerHTML='&#9658;' }">||</div>`;
+		document.body.appendChild(searchbar);
+
+		// HTML
+		sidebar = document.createElement('div');
+		sidebar.id = 'sidebar';
+		sidebar.innerHTML = `
+			<h3 style="color: #FFFFFF; padding-top:10px; padding-left:10px; opacity:0.6;">htcpcp^3:</h3>
+			<div id="sidebarHamburger">&#9776;</div>
+			<form id="sidebar_form">
+				<div style="position:relative; float:left; padding:0 10px 10px 10px; left:0; right:0;">
+					Date:
+					<br>
+					<div class="form-group">
+						<div class="input-append date" data-provide="datepicker">
+						    <input id="datepicker" type="text" class="form-control">
+						    <span class="add-on"><i class="icon-th"></i></span>
+						</div>
+					</div>
+				</div
+				<div style="position:relative; float:left; padding:14px 10px 0 10px; left:0; right:0;">
+					&nbsp;&nbsp;&nbsp;Timeframe (hrs):
+					<br>
+					<div class="form-group">
+						&nbsp;&nbsp;&nbsp;<b>0</b> 
+						<input id="timeframeSlider" type="text" class="span2" value="" data-slider-min="0" data-slider-max="24" data-slider-step="1" data-slider-value="[`+(currentParams.time_start || 9)+`,`+(currentParams.time_end || 17)+`]"/> 
+						<b>24</b>
+					</div>
+				</div>	
+				<div style="position:relative; float:left; padding:20px 10px 0 10px; left:0; right:0;">
+					#Connections seen in timeframe:
+					<br>
+					<div class="form-group">
+						<b>0</b> 
+						<input id="connectionSlider" type="text" class="span2" value="" data-slider-min="0" data-slider-max="100000" data-slider-step="10" data-slider-value="[`+(currentParams.connections_start || 30000)+`,`+(currentParams.connections_end || 100000)+`]"/> 
+						<b>inf</b>
+					</div>
+				</div>	
+				<div style="position:relative; float:left; padding:20px 10px 0 10px; left:0; right:0;">
+					#Packets seen in timeframe:
+					<br>
+					<div class="form-group">
+						<b>0</b> 
+						<input id="pktsSlider" type="text" class="span2" value="" data-slider-min="0" data-slider-max="1000000" data-slider-step="1" data-slider-value="[`+(currentParams.pkts_start || 0)+`,`+(currentParams.pkts_end || 1000000)+`]"/> 
+						<b>inf</b>
+					</div>
+				</div>	
+				<div style="position:relative; float:left; padding:20px 10px 0 10px; left:0; right:0;">
+					Amount of traffic seen in timeframe (MiB):
+					<br>
+					<div class="form-group">
+						<b>0</b> 
+						<input id="byteSlider" type="text" class="span2" value="" data-slider-min="0" data-slider-max="10000" data-slider-step="1" data-slider-value="[`+(currentParams.bytes_start || 0)+`,`+(currentParams.bytes_end || 10000)+`]"/> 
+						<b>inf</b>
+					</div>
+				</div>		
+				<div style="position:relative; float:left; padding:26px 10px 0 10px; left:0; right:0;">
+					<div class="form-group control-group">
+						Source Ports (OR. Default = Any):
+						<br>
+						<input type="text" class="form-control" id="ports_src" placeholder="Example: 22, 23, 443, ..." value="`+(currentParams.src_ports || "")+`" >
+					</div>
+				</div>
+				<div style="position:relative; float:left; padding:10px 10px 0 10px; left:0; right:0;">
+					<div class="form-group control-group">
+						Destination Ports ((OR) OR. Default = Any):
+						<br>
+						<input type="text" class="form-control" id="ports_dst" placeholder="Example: 22, 23, 443, ..." value="`+(currentParams.dst_ports || "")+`" >
+					</div>
+				</div>
+				<div style="position:relative; float:left; padding:10px 10px 0 10px; left:0; right:0;">
+					<div class="form-group control-group">
+						IP's (v4) (Default = None. SRC, DST or both):
+						<br>
+						<input type="text" class="form-control" id="req_ips" placeholder="Example: 192.168.0.0/24, 192.168.1.2/20" value="`+(currentParams.required_ips || "")+`" >
+					</div>
+				</div>
+				<div style="position:relative; float:left; padding:10px 10px 0 10px; left:0; right:0;">
+					<div class="form-group control-group">
+						Protocols (OR. Default = Any):
+						<br>
+						<input type="text" class="form-control" id="protocols" placeholder="Example: TCP, ICMP" value="`+(currentParams.protocols || "")+`" >
+					</div>
+				</div>
+				<div style="position:relative; float:left; padding:10px 10px 0 10px; left:0; right:0; visibility:hidden; display:none;">
+					Use as line color:
+					<br>
+					<div class="form-group">
+						<select class="form-control" id="graphtype_select">
+							<option selected value="direction">Direction (b=src, r=dst)</option>
+							<option value="1">1</option>
+							<option value="2">2</option>
+							<option value="3">3</option>
+						</select>
+					</div>
+				</div>
+				<div style="position:relative; float:left; padding:10px 10px 0 10px; left:0; right:0;">
+					Force repelling nodes:
+					<br>
+					<div class="form-group">
+						<b>0</b> 
+						<input id="vfSlider" type="text" class="span2" value="" data-slider-min="1" data-slider-max="10000" data-slider-step="10" data-slider-value="`+(currentParams.vertexforce || VERTEXFORCE)+`"/> 
+						<b>10k</b>
+					</div>
+				</div>	
+				<div style="position:relative; float:left; padding:20px 10px 10px 10px; left:0; right:0;">
+					Edge force attracting nodes:
+					<br>
+					<div class="form-group">
+						<b>0</b> 
+						<input id="efSlider" type="text" class="span2" value="" data-slider-min="0.000001" data-slider-max="0.00025" data-slider-step="0.000001" data-slider-value="`+(currentParams.edgeforce || EDGEFORCE)+`"/> 
+						<b>0.00025</b>
+					</div>
+				</div>	
+				<div style="position:relative; float:right; margin:24px 40px 40px 10px; left:0;
+					<button id="sidebar_submit" onclick="on_submit(); try{ document.getElementById('sidebar_form').removeChild(document.getElementById('sidebar_confirm')); }catch(e){}" type="submit" class="btn btn-default">Update Graph</button>
+				</div>
+			</form>`;
+		document.body.appendChild(sidebar);
+
+		// Necessary JS for form content
+		var slider0 = new Slider('#timeframeSlider', {});
+		var slider1 = new Slider('#connectionSlider', {
+			scale: 'logarithmic'
+		});
+		var slider2 = new Slider('#pktsSlider', {
+			scale: 'logarithmic'
+		});
+		var slider3 = new Slider('#byteSlider', {
+			scale: 'logarithmic'
+		});
+		var slider4 = new Slider('#vfSlider', {});
+		var slider5 = new Slider('#efSlider', {});
+		
+		// Date input
+		$('.input-append.date').datepicker({
+		    format: "dd-mm-yyyy",
+    		todayHighlight: true
+		});
+		// $('.input-append.date').datepicker("setDate", new Date());							// to preset it with today
+		$('.input-append.date').datepicker('setValue', currentParams.date || '21-03-2017').datepicker('update')		// to preset it with given date
+		$('.input-append.date').datepicker().children('input').val(currentParams.date || '21-03-2017');				// to preset it with given date
+
+		// Toggle sidebar
+		var sidebarHamburgerToggle = true;
+		$('#sidebarHamburger').click(function(){
+			if(!sidebarHamburgerToggle) {
+		 		$("#sidebar").show().css({
+					left: -($("#sidebar").width()-13)
+				}).animate({
+					left: 0
+				}, 250);
+				sidebarHamburgerToggle = true;
+			}
+			else {
+		 		$("#sidebar").animate({
+					left: -($("#sidebar").width()-13)
+				}, 250);
+				sidebarHamburgerToggle = false;
+		 	}
+	 	});
+
+		// Form submit functionality
+		on_submit = function() {
+			// Verify free text fields (reset style first)
+			ports_src.parentNode.className = "form-group control-group";
+			ports_dst.parentNode.className = "form-group control-group";
+			req_ips.parentNode.className = "form-group control-group";
+			ports_src_val = ports_src.value.split(',');
+			ports_dst_val = ports_dst.value.split(',');
+			req_ips_val = req_ips.value.split(',');
+			ports_src_val_ok = true;
+			ports_dst_val_ok = true;
+			req_ips_val_ok = true;
+			for(var i=0; i<ports_src_val.length; i++) {
+				if(isNaN(ports_src_val[i])
+					|| (ports_src_val.length > 1 && ports_src_val[i].trim().length <= 0)) {
+					ports_src_val_ok = false;
+					ports_src.parentNode.className = "form-group control-group error";
+				}
+			}
+			for(var i=0; i<ports_dst_val.length; i++) {
+				if(isNaN(ports_dst_val[i])
+					|| (ports_dst_val.length > 1 && ports_dst_val[i].trim().length <= 0)) {
+					ports_dst_val_ok = false;
+					ports_dst.parentNode.className = "form-group control-group error";
+				}
+			}
+			for(var i=0; i<req_ips_val.length; i++) {
+				if(req_ips_val[i].length > 0
+					&& !(new RegExp('^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?$').test(req_ips_val[i]))
+					|| (req_ips_val.length > 1 && req_ips_val[i].trim().length <= 0)) {
+					req_ips_val_ok = false;
+					req_ips.parentNode.className = "form-group control-group error";
+				}
+			}
+
+			// if all ok, set new url, load new graph
+			if(!ports_src_val_ok || !ports_dst_val_ok || !req_ips_val_ok) {
+				console.log("Invalid form input.");
+			} else {
+				// Set new vertex and edge force
+				VERTEXFORCE = vfSlider.value
+				EDGEFORCE = efSlider.value
+
+				// Set URL parameters
+				var baseUrl = window.location.href.split("?")[0];
+				currentParams.date = datepicker.value
+		      	currentParams.time_start = timeframeSlider.value.split(",")[0].replace(/ /g, ''), 
+		      	currentParams.time_end = timeframeSlider.value.split(",")[1].replace(/ /g, ''), 
+		      	currentParams.connections_start = connectionSlider.value.split(",")[0].replace(/ /g, ''), 
+		      	currentParams.connections_end = connectionSlider.value.split(",")[1].replace(/ /g, ''), 
+		      	currentParams.pkts_start = pktsSlider.value.split(",")[0].replace(/ /g, ''), 
+		      	currentParams.pkts_end = pktsSlider.value.split(",")[1].replace(/ /g, ''), 
+		      	currentParams.bytes_start = byteSlider.value.split(",")[0].replace(/ /g, ''), 
+		      	currentParams.bytes_end = byteSlider.value.split(",")[1].replace(/ /g, ''), 
+		      	currentParams.src_ports = ports_src.value.replace(/ /g, ''), 
+		      	currentParams.dst_ports = ports_dst.value.replace(/ /g, ''), 
+		      	currentParams.required_ips = req_ips.value.replace(/ /g, ''), 
+		      	currentParams.protocols = protocols.value.replace(/ /g, ''), 
+		      	currentParams.type = graphtype_select.value.replace(/ /g, ''), 
+		      	currentParams.vertexforce = VERTEXFORCE, 
+		      	currentParams.edgeforce = EDGEFORCE
+				var newUrl = baseUrl+"?"+$.param(currentParams)
+				window.history.pushState("None/TODO", "None/TODO", newUrl);
+
+				// Load new graph
+				loadGraph(
+		      		API_LOCATION+"/graph", 
+		      		{
+		      			date:datepicker.value, 
+		      			time_start:timeframeSlider.value.split(",")[0].replace(/ /g, ''), 
+		      			time_end:timeframeSlider.value.split(",")[1].replace(/ /g, ''), 
+		      			connections_start:connectionSlider.value.split(",")[0].replace(/ /g, ''), 
+		      			connections_end:connectionSlider.value.split(",")[1].replace(/ /g, ''), 
+		      			pkts_start:pktsSlider.value.split(",")[0].replace(/ /g, ''), 
+		      			pkts_end:pktsSlider.value.split(",")[1].replace(/ /g, ''), 
+		      			bytes_start:byteSlider.value.split(",")[0].replace(/ /g, ''), 
+		      			bytes_end:byteSlider.value.split(",")[1].replace(/ /g, ''), 
+		      			src_ports:ports_src.value.replace(/ /g, ''), 
+		      			dst_ports:ports_dst.value.replace(/ /g, ''), 
+		      			dst_ports:ports_dst.value.replace(/ /g, ''), 
+		      			required_ips:req_ips.value.replace(/ /g, ''), 
+		      			protocols:protocols.value.replace(/ /g, ''), 
+		      			type:graphtype_select.value.replace(/ /g, '')
+		      		}
+		      	);
+			}
+		};
+
+		on_submit();
+	}
+
+	/**
+	 * Basically the UI for VR
+	 */
+	function addHud() {
+		console.log('HUD')
+		var canvas = document.createElement('canvas');
+		// canvas.innerHTML = '<div id="test" style="background:#F00; width:100px; height:100px;"></div>';
+		// var ctx       = canvas.getContext('2d'); 
+		var hudTexture = new THREE.Texture(canvas) 
+		var material = new THREE.MeshBasicMaterial( {map: hudTexture} );
+  		material.transparent = true;
+		var hud = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), material);
+		hudTexture.needsUpdate = true;
+		hud.position.z = - 10;
+		this.camera.add(hud);
+
+		// var canvas=document.getElementById("canvas");
+		// var ctx=canvas.getContext("2d");
+		// var cw=canvas.width;
+		// var ch=canvas.height;
+
+		// drawText('This is the top',canvas.width/2,20,24,'verdana');
+		// drawText('This is the bottom',canvas.width/2,canvas.height-20,16,'Courier');
+
+		// function drawText(text,centerX,centerY,fontsize,fontface){
+		//   ctx.save();
+		//   ctx.font=fontsize+'px '+fontface;
+		//   ctx.textAlign='center';
+		//   ctx.textBaseline='middle';
+		//   ctx.fillText(text,centerX,centerY);
+		//   ctx.restore();
+		// }
+	}
+
+	/**
+	 * Adds loading message to scene
+	 */
+	function addLoading(text) {
+		try {
+			removeLoading(true);
+		} catch (e) {}
+
+		loading = document.createElement('div');
+		loading.id = 'loadingIMG';
+		loading.innerHTML = text;
+		document.body.appendChild(loading);
+	}
+
+	/**
+	 * Updates loading message in scene
+	 */
+	function updateLoading(text) {
+		loading.style.transition = "opacity 0.3s";
+		loading.style.opacity = '0';
+		setTimeout(function() {
+			loading.innerHTML = text;
+			loading.style.opacity = '1';
+		}, 400);
+	}
+
+	/**
+	 * Removes loading message from scene
+	 */
+	function removeLoading(immediately=false) {
+		if(!immediately) {
+			loading.style.transition = "opacity 0.2s";
+			loading.style.opacity = '0';
+			setTimeout(function() {
+				document.body.removeChild(document.getElementById('loadingIMG'));
+			}, 300);
+		}
+		else {
+			document.body.removeChild(document.getElementById('loadingIMG'));
+		}
+	}
+
+	/**
+	 * Called on document load
+	 */
+	function init() {
+		// Check if webvr available
+		if(VR &&
+			WEBVR.isAvailable() === false) {
+			document.body.appendChild(WEBVR.getMessage());
+		}
+		// else {
+			addNonVRUI();
+		// }	
+		
+		// set up the scene, the camera and the renderer
+		createScene();
+
+		// set up controls
+		createControls();
+
+    	projector = new THREE.Projector();
+
+		// Add the graph 
+		var vst = document.getElementById('vertexShader').textContent;
+		var fst = document.getElementById('fragmentShader').textContent;
+		var pfs = document.getElementById('fragmentShaderPos').textContent;
+		var textCreator = new TextCreator();
+      	graph = new ForceDirectedGraph(renderer, world, vst, fst, pfs, textCreator, typed=TYPED);
+
+		// Get filename of graph to be loaded
+      	// And load actual graph data
+      	// graphFile = getQueryString().file;
+      	// if(graphFile == undefined) {
+      	// 	graphFile = 'test_graph.js';
+      	// }
+      	// loadGraph(
+      	// 	graphFile, 
+      	// 	{a:'a', b:'b'}		// Parameters
+      	// );
+
+		// addHud();
+		// Start animation loop
+		loop();
+	}
+
+	// On document window load, call init()
+	window.addEventListener('load', init, false);
+</script> 
+
+<!--html-->
+<div id="world"></div>
+
+</body> 
+</html>
